@@ -930,9 +930,21 @@ endif # BUILDING_RAMDISK_IMAGE
 # This is defined here since we may be building recovery as boot
 # below and only want to define this once
 ifneq ($(strip $(BOARD_KERNEL_BINARIES)),)
+ifeq (yes,$(MAIN_VBMETA_IN_BOOT))
+  BUILT_BOOTIMAGE_TARGET := $(foreach k,$(subst kernel,boot,$(BOARD_KERNEL_BINARIES)), $(call intermediates-dir-for,PACKAGING,boot)/$(k).img)
+  MTK_BOOTIMAGE_TARGET := $(foreach k,$(subst kernel,boot,$(BOARD_KERNEL_BINARIES)), $(PRODUCT_OUT)/$(k).img)
+else
   BUILT_BOOTIMAGE_TARGET := $(foreach k,$(subst kernel,boot,$(BOARD_KERNEL_BINARIES)), $(PRODUCT_OUT)/$(k).img)
+endif
+
+else
+
+ifeq (yes,$(MAIN_VBMETA_IN_BOOT))
+  BUILT_BOOTIMAGE_TARGET := $(call intermediates-dir-for,PACKAGING,boot)/boot.img
+  MTK_BOOTIMAGE_TARGET := $(PRODUCT_OUT)/boot.img
 else
   BUILT_BOOTIMAGE_TARGET := $(PRODUCT_OUT)/boot.img
+endif
 endif
 
 INTERNAL_PREBUILT_BOOTIMAGE :=
@@ -1234,7 +1246,12 @@ $(INSTALLED_BOOTIMAGE_TARGET): $(INTERNAL_PREBUILT_BOOTIMAGE)
 endif # BOARD_AVB_ENABLE
 
 else # BOARD_PREBUILT_BOOTIMAGE not defined
+ifeq (yes,$(MAIN_VBMETA_IN_BOOT))
 INSTALLED_BOOTIMAGE_TARGET :=
+MTK_BOOTIMAGE_TARGET :=
+else
+INSTALLED_BOOTIMAGE_TARGET :=
+endif
 endif # BOARD_PREBUILT_BOOTIMAGE
 endif # TARGET_NO_KERNEL
 endif # my_installed_prebuilt_gki_apex not defined
@@ -4650,6 +4667,23 @@ endif # BUILDING_VBMETA_IMAGE
 
 endif # BOARD_AVB_ENABLE
 
+ifneq ($(strip $(TARGET_NO_KERNEL)),true)
+ifeq (yes, $(strip $(MAIN_VBMETA_IN_BOOT)))
+
+ifeq (true, $(strip $(BOARD_AVB_ENABLE)))
+$(MTK_BOOTIMAGE_TARGET): $(INSTALLED_BOOTIMAGE_TARGET) $(BUILT_VBMETAIMAGE_TARGET) $(AVBTOOL)
+	@echo "Install boot image: $@"
+	$(copy-file-to-target)
+	$(hide) $(AVBTOOL) append_vbmeta_image --image $@ --partition_size $(BOARD_BOOTIMAGE_PARTITION_SIZE) --vbmeta_image $(BUILT_VBMETAIMAGE_TARGET)
+endif
+
+else
+$(MTK_BOOTIMAGE_TARGET): $(INSTALLED_BOOTIMAGE_TARGET)
+	@echo "Install boot image: $@"
+	$(copy-file-to-target)
+endif # MAIN_VBMETA_IN_BOOT
+endif # TARGET_NO_KERNEL
+
 # List of files from all images
 INTERNAL_ALLIMAGES_FILES := \
     $(FULL_SYSTEMIMAGE_DEPS) \
@@ -5337,6 +5371,9 @@ ifneq (,$(strip $(BOARD_CUSTOMIMAGES_PARTITION_LIST)))
 	    echo "avb_$(partition)_partition_size=$(BOARD_AVB_$(call to-upper,$(partition))_PARTITION_SIZE)"  >> $@; \
 	    echo "avb_$(partition)_image_list=$(foreach image,$(BOARD_AVB_$(call to-upper,$(partition))_IMAGE_LIST),$(notdir $(image)))" >> $@;)
 endif # BOARD_CUSTOMIMAGES_PARTITION_LIST
+ifeq (yes, $(strip $(MAIN_VBMETA_IN_BOOT)))
+	$(hide) echo "avb_main_vbmeta_in_boot=true" >> $@
+endif # MAIN_VBMETA_IN_BOOT
 ifneq (,$(strip $(BOARD_AVB_VBMETA_SYSTEM)))
 	$(hide) echo "avb_vbmeta_system=$(BOARD_AVB_VBMETA_SYSTEM)" >> $@
 	$(hide) echo "avb_vbmeta_system_args=$(BOARD_AVB_MAKE_VBMETA_SYSTEM_IMAGE_ARGS)" >> $@
@@ -5722,6 +5759,46 @@ endif
 
 # Depending on the various images guarantees that the underlying
 # directories are up-to-date.
+ifeq (yes,$(MAIN_VBMETA_IN_BOOT))
+$(BUILT_TARGET_FILES_PACKAGE): \
+	    $(INSTALLED_RADIOIMAGE_TARGET) \
+	    $(INSTALLED_RECOVERYIMAGE_TARGET) \
+	    $(INSTALLED_CACHEIMAGE_TARGET) \
+	    $(INSTALLED_DTBOIMAGE_TARGET) \
+	    $(INSTALLED_PVMFWIMAGE_TARGET) \
+	    $(INSTALLED_PVMFW_EMBEDDED_AVBKEY_TARGET) \
+	    $(INSTALLED_CUSTOMIMAGES_TARGET) \
+	    $(INSTALLED_ANDROID_INFO_TXT_TARGET) \
+	    $(INSTALLED_RECOVERY_KERNEL_TARGET) \
+	    $(INSTALLED_KERNEL_TARGET) \
+	    $(INSTALLED_RAMDISK_TARGET) \
+	    $(MTK_BOOTIMAGE_TARGET) \
+	    $(INSTALLED_DTBIMAGE_TARGET) \
+	    $(INSTALLED_2NDBOOTLOADER_TARGET) \
+	    $(BOARD_PREBUILT_DTBOIMAGE) \
+	    $(BOARD_PREBUILT_RECOVERY_DTBOIMAGE) \
+	    $(BOARD_RECOVERY_ACPIO) \
+	    $(PRODUCT_SYSTEM_BASE_FS_PATH) \
+	    $(PRODUCT_VENDOR_BASE_FS_PATH) \
+	    $(PRODUCT_PRODUCT_BASE_FS_PATH) \
+	    $(PRODUCT_SYSTEM_EXT_BASE_FS_PATH) \
+	    $(PRODUCT_ODM_BASE_FS_PATH) \
+	    $(PRODUCT_VENDOR_DLKM_BASE_FS_PATH) \
+	    $(PRODUCT_ODM_DLKM_BASE_FS_PATH) \
+	    $(PRODUCT_SYSTEM_DLKM_BASE_FS_PATH) \
+	    $(LPMAKE) \
+	    $(SELINUX_FC) \
+	    $(INSTALLED_MISC_INFO_TARGET) \
+	    $(APKCERTS_FILE) \
+	    $(SOONG_APEX_KEYS_FILE) \
+	    $(SOONG_ZIP) \
+	    $(HOST_OUT_EXECUTABLES)/fs_config \
+	    $(ADD_IMG_TO_TARGET_FILES) \
+	    $(MAKE_RECOVERY_PATCH) \
+	    $(BUILT_KERNEL_CONFIGS_FILE) \
+	    $(BUILT_KERNEL_VERSION_FILE) \
+	    | $(ACP)
+else
 $(BUILT_TARGET_FILES_PACKAGE): \
 	    $(INSTALLED_RADIOIMAGE_TARGET) \
 	    $(INSTALLED_RECOVERYIMAGE_TARGET) \
@@ -5759,6 +5836,7 @@ $(BUILT_TARGET_FILES_PACKAGE): \
 	    $(BUILT_KERNEL_CONFIGS_FILE) \
 	    $(BUILT_KERNEL_VERSION_FILE) \
 	    | $(ACP)
+endif
 	@echo "Package target files: $@"
 	$(hide) rm -rf $@ $@.list $(zip_root)
 	$(hide) mkdir -p $(dir $@) $(zip_root)
@@ -6176,6 +6254,11 @@ endif
 ifeq ($(BUILD_QEMU_IMAGES),true)
 	$(hide) AVBTOOL=$(AVBTOOL) $(MK_VBMETA_BOOT_KERNEL_CMDLINE_SH) $(zip_root)/IMAGES/vbmeta.img \
 	    $(zip_root)/IMAGES/system.img $(zip_root)/IMAGES/VerifiedBootParams.textproto
+endif
+ifeq (yes, $(strip $(MAIN_VBMETA_IN_BOOT)))
+ifeq (true, $(strip $(BOARD_AVB_ENABLE)))
+	$(hide) $(AVBTOOL) append_vbmeta_image --image $(zip_root)/IMAGES/boot.img --partition_size $(BOARD_BOOTIMAGE_PARTITION_SIZE) --vbmeta_image $(zip_root)/IMAGES/vbmeta.img
+endif
 endif
 	@# Zip everything up, preserving symlinks and placing META/ files first to
 	@# help early validation of the .zip file while uploading it.
